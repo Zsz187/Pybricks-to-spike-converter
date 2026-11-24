@@ -1,0 +1,11 @@
+
+## Notes
+
+- Runs entirely in the browser — no backend, no build step.
+- React, ReactDOM, Babel, and Tailwind load from CDNs.
+- Works on GitHub Pages and by opening `index.html` locally.
+- Always re-tune gains and ports in the generated code before running on hardware.
+
+## License
+
+MIT

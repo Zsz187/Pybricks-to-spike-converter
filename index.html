@@ -1,0 +1,1039 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pybricks to SPIKE Converter</title>
+<meta name="description" content="Convert Pybricks / FLL Path Studio Python into SPIKE Prime Python, with gyro-corrected straights and turns." />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = { darkMode: "class" };
+</script>
+<style>
+  body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .font-serif { font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif; }
+  pre { tab-size: 2; }
+</style>
+</head>
+<body class="bg-slate-100 dark:bg-slate-950">
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect } = React;
+
+/* =====================================================================
+   PYBRICKS -> SPIKE PRIME CONVERSION ENGINE
+   ===================================================================== */
+
+const DEFAULT_SETTINGS = {
+  wheelDiameter: 56.0,
+  axleTrack: 112.0,
+  driveKp: 4.0,
+  turnKp: 3.5,
+  turnTolerance: 1.0,
+  drivePorts: ["A", "B"],
+};
+
+const IMPORT_MAP = {
+  "pybricks.hubs": "spike",
+  "pybricks.pupdevices": "spike",
+  "pybricks.parameters": "spike",
+  "pybricks.robotics": "spike",
+  "pybricks.tools": "spike.control",
+  "pybricks.geometry": "spike",
+  "pybricks.iodevices": "spike",
+  "pybricks.media": "spike",
+  "pybricks.messaging": "spike",
+  "pybricks.ev3devices": "spike",
+  "pybricks.nxtdevices": "spike",
+  "pybricks": "spike",
+};
+
+const SYMBOL_MAP = {
+  PrimeHub: "PrimeHub",
+  InventorHub: "PrimeHub",
+  EssentialHub: "PrimeHub",
+  CityHub: "PrimeHub",
+  TechnicHub: "PrimeHub",
+  MoveHub: "PrimeHub",
+  Motor: "Motor",
+  DCMotor: "Motor",
+  DriveBase: "MotorPair",
+  ColorSensor: "ColorSensor",
+  ColorDistanceSensor: "ColorSensor",
+  UltrasonicSensor: "DistanceSensor",
+  ForceSensor: "ForceSensor",
+  TouchSensor: "ForceSensor",
+  InfraredSensor: "DistanceSensor",
+  Port: "Port",
+  Direction: "Direction",
+  Stop: "Stop",
+  Color: "Color",
+  Button: "Button",
+  wait: "wait_for_seconds",
+  StopWatch: "Timer",
+  Timer: "Timer",
+  Matrix: "Matrix",
+  vector: "vector",
+};
+
+const METHOD_MAP = {
+  ".imu.reset_heading": ".motion_sensor.reset_yaw_angle",
+  ".imu.heading": ".motion_sensor.get_yaw_angle",
+  ".imu.angle": ".motion_sensor.get_yaw_angle",
+  ".imu.rotation": ".motion_sensor.get_yaw_angle",
+  ".imu.acceleration": ".motion_sensor.get_acceleration",
+  ".imu.angular_velocity": ".motion_sensor.get_angular_velocity",
+  ".imu.tilt": ".motion_sensor.get_tilt_angles",
+  ".imu.ready": ".motion_sensor.is_ready",
+  ".imu.settings": ".motion_sensor.set_yaw_angle",
+  ".battery.voltage": ".battery.get_voltage",
+  ".battery.current": ".battery.get_current",
+  ".battery.percentage": ".battery.get_percentage",
+  ".buttons.pressed": ".buttons.is_pressed",
+  ".speaker.beep": ".sound.beep",
+  ".speaker.volume": ".sound.set_volume",
+  ".light.on": ".status_light.on",
+  ".light.off": ".status_light.off",
+  ".light.blink": ".status_light.blink",
+  ".display.text": ".display.show",
+  ".display.image": ".display.show",
+  ".display.off": ".display.clear",
+  ".run": ".start",
+  ".run_time": ".run_for_seconds",
+  ".run_angle": ".run_for_degrees",
+  ".run_until_stalled": ".run_to_position",
+  ".stop": ".stop",
+  ".brake": ".stop",
+  ".hold": ".stop",
+  ".coast": ".stop",
+  ".angle": ".get_position",
+  ".speed": ".get_speed",
+  ".load": ".get_speed",
+  ".reset_angle": ".set_position",
+  ".dc": ".start",
+  ".straight": ".move",
+  ".turn": ".move",
+  ".drive": ".start",
+  ".drive_time": ".start",
+  ".drive_angle": ".start",
+  ".curve": ".move",
+  ".reset": ".reset",
+  ".settings": ".set_default_speed",
+  ".distance": ".get_distance",
+  ".color": ".get_color",
+  ".reflection": ".get_reflected_light_intensity",
+  ".ambient": ".get_ambient_light_intensity",
+  ".rgb": ".get_rgb_intensity",
+  ".hsv": ".get_hsv",
+  ".presence": ".get_distance_cm",
+  ".force": ".get_force_newton",
+  ".pressed": ".is_pressed",
+  ".touched": ".is_pressed",
+  ".measure": ".get_distance_cm",
+};
+
+const CONST_MAP = {
+  "Direction.CLOCKWISE": "Direction.CLOCKWISE",
+  "Direction.COUNTERCLOCKWISE": "Direction.COUNTERCLOCKWISE",
+  "Stop.COAST": "Stop.COAST",
+  "Stop.BRAKE": "Stop.BRAKE",
+  "Stop.HOLD": "Stop.HOLD",
+  "Color.RED": "Color.RED",
+  "Color.GREEN": "Color.GREEN",
+  "Color.BLUE": "Color.BLUE",
+  "Color.YELLOW": "Color.YELLOW",
+  "Color.WHITE": "Color.WHITE",
+  "Color.BLACK": "Color.BLACK",
+  "Color.NONE": "Color.NONE",
+  "Button.LEFT": "Button.LEFT",
+  "Button.RIGHT": "Button.RIGHT",
+  "Button.CENTER": "Button.CENTER",
+};
+
+function buildHeader(s) {
+  return `# =====================================================================
+# Auto-generated SPIKE Prime Python from Pybricks (FLL Path Studio)
+# Converted by Pybricks -> SPIKE Converter
+# Drive motors on ${s.drivePorts[0]} & ${s.drivePorts[1]}, attachments on C-F, gyro via hub IMU
+# =====================================================================
+from spike import PrimeHub, MotorPair, Motor, ColorSensor, DistanceSensor, ForceSensor
+from spike.control import wait_for_seconds, wait_until, Timer
+import math
+
+hub = PrimeHub()
+drive = MotorPair('${s.drivePorts[0]}', '${s.drivePorts[1]}')
+gyro = hub.motion_sensor
+
+# --- Attachment motors (edit ports here) ---
+ATTACH_PORTS = ['D', 'C', 'E', 'F']
+attach_motors = {p: Motor(p) for p in ATTACH_PORTS}
+
+# --- Calibration constants (tune for your robot) ---
+WHEEL_DIAMETER_MM = ${s.wheelDiameter}
+AXLE_TRACK_MM = ${s.axleTrack}
+DEG_PER_MM = 360 / (math.pi * WHEEL_DIAMETER_MM)
+DRIVE_KP = ${s.driveKp}
+TURN_KP = ${s.turnKp}
+TURN_TOLERANCE = ${s.turnTolerance}
+
+def angle_diff(a, b):
+    return (a - b + 180) % 360 - 180
+
+def reset_heading():
+    gyro.reset_yaw_angle()
+
+def drive_gyro(distance_mm, speed=400, target_heading=0, kp=DRIVE_KP, timeout_ms=None):
+    """Drive straight with proportional gyro correction (with timeout)."""
+    reset_heading()
+    sign = 1 if distance_mm >= 0 else -1
+    target_dist = abs(distance_mm)
+    if timeout_ms is None:
+        timeout_ms = int(target_dist / max(1, abs(speed)) * 2000) + 1500
+    timer = Timer()
+    traveled = 0
+    while traveled < target_dist and timer.time() * 1000 < timeout_ms:
+        error = angle_diff(gyro.get_yaw_angle(), target_heading)
+        correction = -kp * error
+        drive.start(sign * speed, sign * speed + correction)
+        wait_for_seconds(0.01)
+        traveled += abs(speed) * 0.01 * 0.9
+    drive.stop()
+
+def turn_gyro(target_angle, turn_speed=360, kp=TURN_KP, tolerance=TURN_TOLERANCE, timeout_ms=5000):
+    """Pivot to an absolute heading by the shortest way (with timeout)."""
+    timer = Timer()
+    while timer.time() * 1000 < timeout_ms:
+        error = angle_diff(target_angle, gyro.get_yaw_angle())
+        if abs(error) <= tolerance:
+            break
+        rate = max(-turn_speed, min(turn_speed, error * kp))
+        drive.start(rate, -rate)
+        wait_for_seconds(0.01)
+    drive.stop()
+
+def drive_scurve(distance_mm, speed=400, target_heading=0, kp=DRIVE_KP,
+                 accel=700, jerk_acc=3500, jerk_dec=1925, dt_ms=20):
+    """Rest-to-rest S-curve velocity profile with gyro correction."""
+    reset_heading()
+    sign = 1 if distance_mm >= 0 else -1
+    D = abs(distance_mm)
+    if D < 1:
+        return
+    V = abs(speed)
+    A = max(1, abs(accel))
+    JA = max(1, abs(jerk_acc))
+    JD = max(1, abs(jerk_dec))
+
+    def half_dist(v, j):
+        tj = A / j
+        ta = v / A - tj
+        if ta >= 0:
+            return (v * v) / (2 * A) + (v * tj) / 2
+        tje = (v / j) ** 0.5
+        return v * tje
+
+    def half_time(v, j):
+        tj = A / j
+        ta = v / A - tj
+        if ta >= 0:
+            return ta + 2 * tj
+        return 2 * ((v / j) ** 0.5)
+
+    lo, hi = 0.0, float(V)
+    for _ in range(24):
+        mid = 0.5 * (lo + hi)
+        if half_dist(mid, JA) + half_dist(mid, JD) <= D:
+            lo = mid
+        else:
+            hi = mid
+    v_peak = lo if lo > 1 else min(V, D)
+    t_acc = half_time(v_peak, JA)
+    t_dec = half_time(v_peak, JD)
+    d_pair = half_dist(v_peak, JA) + half_dist(v_peak, JD)
+    t_cruise = max(0, (D - d_pair) / max(1, v_peak))
+    T = t_acc + t_cruise + t_dec
+    timer = Timer()
+    while timer.time() * 1000 < int(T * 1000) + 2000:
+        t = timer.time()
+        if t <= t_acc and t_acc > 0:
+            tau = t / t_acc
+            cmd = v_peak * (3 * tau * tau - 2 * tau * tau * tau)
+        elif t <= t_acc + t_cruise:
+            cmd = v_peak
+        elif T > t_acc + t_cruise:
+            tau = (t - t_acc - t_cruise) / max(1e-6, t_dec)
+            tau = max(0, min(1, tau))
+            cmd = v_peak * (1 - (3 * tau * tau - 2 * tau * tau * tau))
+        else:
+            cmd = 0
+        cmd = max(0, min(V, cmd))
+        error = angle_diff(gyro.get_yaw_angle(), target_heading)
+        drive.start(cmd * sign, cmd * sign - kp * error)
+        wait_for_seconds(dt_ms / 1000.0)
+    drive.stop()
+
+def drive_tank_curve(distance_mm, speed=200, turn_rate=0, target_heading=0, kp=2.0, timeout_ms=None):
+    """Follow a short path chord with simultaneous drive + turn (tank differential)."""
+    reset_heading()
+    sign = 1 if distance_mm >= 0 else -1
+    target_dist = abs(distance_mm)
+    if timeout_ms is None:
+        timeout_ms = int(target_dist / max(1, abs(speed)) * 2500) + 2000
+    timer = Timer()
+    traveled = 0
+    while traveled < target_dist and timer.time() * 1000 < timeout_ms:
+        error = angle_diff(gyro.get_yaw_angle(), target_heading)
+        rate = turn_rate - kp * error
+        drive.start(speed * sign, speed * sign + rate)
+        wait_for_seconds(0.01)
+        traveled += abs(speed) * 0.01 * 0.9
+    drive.stop()
+
+def run_angle(port, speed, angle):
+    """Rotate an attachment motor by a number of degrees."""
+    attach_motors[port].run_for_degrees(int(speed), int(angle))
+
+def run_attach(port, speed, seconds):
+    """Run an attachment motor for a number of seconds."""
+    attach_motors[port].start(int(speed))
+    wait_for_seconds(seconds)
+    attach_motors[port].stop()
+
+`;
+}
+
+function normalize(line) {
+  return line.replace(/\s+/g, " ").trim();
+}
+
+function parseArgs(argStr) {
+  const args = {};
+  const parts = argStr.split(",");
+  let positional = 0;
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq > -1) {
+      args[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim();
+    } else {
+      args["_" + positional++] = trimmed;
+    }
+  }
+  return args;
+}
+
+function extractCall(line, name) {
+  const re = new RegExp("(?:^|[^\\w])" + name + "\\s*\\(([^)]*)\\)", "i");
+  const m = line.match(re);
+  return m ? m[1] : null;
+}
+
+function substituteSymbols(code) {
+  let out = code;
+  out = out.replace(
+    /from\s+(pybricks[\w.]*)\s+import\s+([^\n]+)/g,
+    (m, mod, names) => {
+      const target = IMPORT_MAP[mod] || "spike";
+      const mapped = names
+        .split(",")
+        .map((n) => {
+          const t = n.trim();
+          return SYMBOL_MAP[t] || t;
+        })
+        .join(", ");
+      return "from " + target + " import " + mapped;
+    }
+  );
+  out = out.replace(/import\s+(pybricks[\w.]*)/g, (m, mod) => {
+    return "import " + (IMPORT_MAP[mod] || "spike");
+  });
+  const methods = Object.keys(METHOD_MAP).sort((a, b) => b.length - a.length);
+  for (const key of methods) {
+    out = out.split(key).join(METHOD_MAP[key]);
+  }
+  for (const key of Object.keys(CONST_MAP)) {
+    out = out.split(key).join(CONST_MAP[key]);
+  }
+  for (const key of Object.keys(SYMBOL_MAP)) {
+    const re = new RegExp("\\b" + key + "\\b", "g");
+    out = out.replace(re, SYMBOL_MAP[key]);
+  }
+  return out;
+}
+
+const IGNORE_PATTERNS = [
+  /^\)\s*[,;]?\s*$/,
+  /^\w+\s*=\s*-?\d+(?:\.\d+)?\s*,?$/,
+  /^(wheel_diameter|axle_track|straight_speed|straight_acceleration|turn_rate|turn_acceleration)\s*=/i,
+];
+
+function isIgnorable(line) {
+  return IGNORE_PATTERNS.some((re) => re.test(line));
+}
+
+function convert(input, settings) {
+  settings = settings || DEFAULT_SETTINGS;
+  const warnings = [];
+  const stats = { straight: 0, turns: 0, other: 0 };
+  const body = [];
+  const preamble = [];
+
+  const lines = input.split("\n");
+  for (const raw of lines) {
+    const line = normalize(raw);
+    if (!line) continue;
+    if (line.startsWith("#")) continue;
+    if (/^def\s+/i.test(line)) continue;
+    if (/^run_fll_mission\s*\(\s*\)/i.test(line)) continue;
+    if (/^(return|"""|''')/.test(line)) continue;
+
+    const dg = extractCall(line, "drive_gyro");
+    if (dg !== null) {
+      const a = parseArgs(dg);
+      const dist = a["_0"] || "0";
+      const heading = a["target_heading"] || "0";
+      const speed = a["speed"] || "400";
+      body.push("drive_gyro(" + dist + ", speed=" + speed + ", target_heading=" + heading + ")");
+      stats.straight++;
+      continue;
+    }
+
+    const ds = extractCall(line, "drive_scurve");
+    if (ds !== null) {
+      const a = parseArgs(ds);
+      const dist = a["_0"] || "0";
+      const heading = a["target_heading"] || "0";
+      const speed = a["speed"] || "400";
+      body.push("drive_scurve(" + dist + ", speed=" + speed + ", target_heading=" + heading + ")");
+      stats.straight++;
+      continue;
+    }
+
+    const dtc = extractCall(line, "drive_tank_curve");
+    if (dtc !== null) {
+      const a = parseArgs(dtc);
+      const dist = a["_0"] || "0";
+      const speed = a["speed"] || "200";
+      const turnRate = a["turn_rate"] || "0";
+      const heading = a["target_heading"] || "0";
+      body.push(
+        "drive_tank_curve(" + dist + ", speed=" + speed + ", turn_rate=" + turnRate +
+        ", target_heading=" + heading + ")"
+      );
+      stats.straight++;
+      continue;
+    }
+
+    const tg = extractCall(line, "turn_gyro");
+    if (tg !== null) {
+      const a = parseArgs(tg);
+      const angle = a["_0"] || "0";
+      const speed = a["turn_speed"] || "360";
+      body.push("turn_gyro(" + angle + ", turn_speed=" + speed + ")");
+      stats.turns++;
+      continue;
+    }
+
+    const ra = extractCall(line, "run_angle");
+    if (ra !== null && /\.run_angle/i.test(line)) {
+      const a = parseArgs(ra);
+      const speed = a["_0"] || "500";
+      const angle = a["_1"] || "0";
+      const motorMatch = line.match(/([A-Za-z_]\w*)\s*\.\s*run_angle/i);
+      const varName = motorMatch ? motorMatch[1] : "attach_D";
+      const portMatch = varName.match(/_([A-F])$/i);
+      const port = portMatch ? portMatch[1].toUpperCase() : "D";
+      body.push("run_angle('" + port + "', " + speed + ", " + angle + ")");
+      stats.other++;
+      continue;
+    }
+
+    const rt = extractCall(line, "run_time");
+    if (rt !== null && /\.run_time/i.test(line)) {
+      const a = parseArgs(rt);
+      const speed = a["_0"] || "500";
+      const seconds = a["_1"] || "1";
+      const motorMatch = line.match(/([A-Za-z_]\w*)\s*\.\s*run_time/i);
+      const varName = motorMatch ? motorMatch[1] : "attach_D";
+      const portMatch = varName.match(/_([A-F])$/i);
+      const port = portMatch ? portMatch[1].toUpperCase() : "D";
+      body.push("run_attach('" + port + "', " + speed + ", " + seconds + ")");
+      stats.other++;
+      continue;
+    }
+
+    const straightMatch = line.match(/(?:drive_base|drive|robot)\s*\.\s*straight\s*\(\s*(-?\d+(?:\.\d+)?)\s*(?:,\s*(\d+(?:\.\d+)?))?\s*\)/i);
+    if (straightMatch) {
+      const dist = straightMatch[1];
+      const speed = straightMatch[2] || "400";
+      body.push("drive_gyro(" + dist + ", speed=" + speed + ")");
+      stats.straight++;
+      continue;
+    }
+
+    const turnMatch = line.match(/(?:drive_base|drive|robot)\s*\.\s*turn\s*\(\s*(-?\d+(?:\.\d+)?)\s*(?:,\s*(\d+(?:\.\d+)?))?\s*\)/i);
+    if (turnMatch) {
+      const angle = turnMatch[1];
+      const speed = turnMatch[2] || "360";
+      body.push("turn_gyro(" + angle + ", turn_speed=" + speed + ")");
+      stats.turns++;
+      continue;
+    }
+
+    const waitMatch = line.match(/\bwait\s*\(\s*(\d+(?:\.\d+)?)\s*\)/i);
+    if (waitMatch) {
+      body.push("wait_for_seconds(" + waitMatch[1] + ")");
+      stats.other++;
+      continue;
+    }
+
+    if (/^print\s*\(/i.test(line)) {
+      body.push(line);
+      stats.other++;
+      continue;
+    }
+
+    if (isIgnorable(line)) continue;
+
+    const converted = substituteSymbols(line);
+
+    if (
+      /^(hub|drive|gyro|left_motor|right_motor|attach_\w+)\s*=/i.test(converted) ||
+      /^(hub|drive|gyro|left_motor|right_motor|attach_\w+)\./i.test(converted)
+    ) {
+      preamble.push(converted);
+      stats.other++;
+      continue;
+    }
+
+    if (/[=()]/.test(converted)) {
+      body.push(converted);
+      stats.other++;
+      continue;
+    }
+
+    warnings.push('Unrecognized line skipped: "' + line + '"');
+  }
+
+  if (body.length === 0 && preamble.length === 0) {
+    return { code: "", warnings: ["No recognizable Pybricks commands found."], stats };
+  }
+
+  const mission = [
+    "def run_fll_mission():",
+    '    print("Starting Gyro-Corrected Mission Routine...")',
+    ...body.map((b) => "    " + b),
+    '    print("Mission Complete!")',
+    "",
+    "run_fll_mission()",
+    "",
+  ];
+
+  const preambleBlock = preamble.length
+    ? "# --- Converted setup statements ---\n" + preamble.join("\n") + "\n\n"
+    : "";
+
+  return {
+    code: buildHeader(settings) + preambleBlock + mission.join("\n"),
+    warnings,
+    stats,
+  };
+}
+
+/* =====================================================================
+   SAMPLE INPUT
+   ===================================================================== */
+
+const SAMPLE = `# Created with FLL Path Studio by FTC Team 27003 The Churchill Hawks 2.0
+# Pybricks Python Path Script with Gyro Heading Correction
+# Gyro gains: drive_kp=4.0, turn_kp=3.5, turn_tolerance=1.0
+from pybricks.hubs import PrimeHub
+from pybricks.pupdevices import Motor
+from pybricks.parameters import Port, Direction
+from pybricks.robotics import DriveBase
+from pybricks.tools import wait
+
+hub = PrimeHub()
+hub.imu.reset_heading(0)
+left_motor = Motor(Port.A, Direction.COUNTERCLOCKWISE)
+right_motor = Motor(Port.B, Direction.CLOCKWISE)
+drive_base = DriveBase(left_motor=left_motor, right_motor=right_motor, wheel_diameter=56.0, axle_track=112.0)
+drive_base.reset()
+drive_base.settings(straight_speed=400, straight_acceleration=700, turn_rate=360, turn_acceleration=1188)
+
+from pybricks.tools import StopWatch
+
+def angle_diff(a, b):
+    d = (a - b + 180) % 360 - 180
+    return d
+
+def drive_gyro(distance_mm, speed=400, target_heading=0, kp=4.0, timeout_ms=None):
+    drive_base.reset()
+    sign = 1 if distance_mm >= 0 else -1
+    target_dist = abs(distance_mm)
+    if timeout_ms is None:
+        timeout_ms = int(target_dist / max(1, abs(speed)) * 2000) + 1500
+    sw = StopWatch()
+    while abs(drive_base.distance()) < target_dist and sw.time() < timeout_ms:
+        error = angle_diff(hub.imu.heading(), target_heading)
+        drive_base.drive(speed * sign, -kp * error)
+        wait(10)
+    drive_base.stop()
+
+def turn_gyro(target_angle, turn_speed=360, kp=3.5, tolerance=1.0, timeout_ms=5000):
+    sw = StopWatch()
+    while sw.time() < timeout_ms:
+        error = angle_diff(target_angle, hub.imu.heading())
+        if abs(error) <= tolerance:
+            break
+        rate = max(-turn_speed, min(turn_speed, error * kp))
+        drive_base.drive(0, rate)
+        wait(10)
+    drive_base.stop()
+
+def drive_scurve(distance_mm, speed=400, target_heading=0, kp=4.0, accel=700, jerk_acc=3500, jerk_dec=1925, dt_ms=20):
+    drive_base.reset()
+    sign = 1 if distance_mm >= 0 else -1
+    D = abs(distance_mm)
+    if D < 1:
+        return
+    V = abs(speed)
+    A = max(1, abs(accel))
+    JA = max(1, abs(jerk_acc))
+    JD = max(1, abs(jerk_dec))
+    def half_dist(v, j):
+        tj = A / j
+        ta = v / A - tj
+        if ta >= 0:
+            return (v * v) / (2 * A) + (v * tj) / 2
+        tje = (v / j) ** 0.5
+        return v * tje
+    def half_time(v, j):
+        tj = A / j
+        ta = v / A - tj
+        if ta >= 0:
+            return ta + 2 * tj
+        return 2 * ((v / j) ** 0.5)
+    lo, hi = 0.0, float(V)
+    for _ in range(24):
+        mid = 0.5 * (lo + hi)
+        if half_dist(mid, JA) + half_dist(mid, JD) <= D:
+            lo = mid
+        else:
+            hi = mid
+    v_peak = lo if lo > 1 else min(V, D)
+    t_acc = half_time(v_peak, JA)
+    t_dec = half_time(v_peak, JD)
+    d_pair = half_dist(v_peak, JA) + half_dist(v_peak, JD)
+    t_cruise = max(0, (D - d_pair) / max(1, v_peak))
+    T = t_acc + t_cruise + t_dec
+    sw = StopWatch()
+    while abs(drive_base.distance()) < D and sw.time() < int(T * 1000) + 2000:
+        t = sw.time() / 1000.0
+        if t <= t_acc and t_acc > 0:
+            tau = t / t_acc
+            cmd = v_peak * (3 * tau * tau - 2 * tau * tau * tau)
+        elif t <= t_acc + t_cruise:
+            cmd = v_peak
+        elif T > t_acc + t_cruise:
+            tau = (t - t_acc - t_cruise) / max(1e-6, t_dec)
+            tau = max(0, min(1, tau))
+            cmd = v_peak * (1 - (3 * tau * tau - 2 * tau * tau * tau))
+        else:
+            cmd = 0
+        cmd = max(0, min(V, cmd))
+        error = angle_diff(hub.imu.heading(), target_heading)
+        drive_base.drive(cmd * sign, -kp * error)
+        wait(dt_ms)
+    drive_base.stop()
+
+def drive_tank_curve(distance_mm, speed=200, turn_rate=0, target_heading=0, kp=2.0, timeout_ms=None):
+    drive_base.reset()
+    sign = 1 if distance_mm >= 0 else -1
+    target_dist = abs(distance_mm)
+    if timeout_ms is None:
+        timeout_ms = int(target_dist / max(1, abs(speed)) * 2500) + 2000
+    sw = StopWatch()
+    while abs(drive_base.distance()) < target_dist and sw.time() < timeout_ms:
+        error = angle_diff(hub.imu.heading(), target_heading)
+        rate = turn_rate - kp * error
+        drive_base.drive(speed * sign, rate)
+        wait(10)
+    drive_base.stop()
+
+def run_fll_mission():
+    print("Starting Gyro-Corrected Mission Routine...")
+    drive_scurve(400.0, target_heading=0.0)
+    print("Mission Complete!")
+
+run_fll_mission()`;
+
+/* =====================================================================
+   COMPONENTS
+   ===================================================================== */
+
+function ThemeToggle() {
+  const [dark, setDark] = useState(false);
+  useEffect(() => {
+    const stored = localStorage.getItem("theme");
+    const prefers = stored === "dark" || (!stored && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    setDark(prefers);
+    document.documentElement.classList.toggle("dark", prefers);
+  }, []);
+  function toggle() {
+    const next = !dark;
+    setDark(next);
+    document.documentElement.classList.toggle("dark", next);
+    localStorage.setItem("theme", next ? "dark" : "light");
+  }
+  return (
+    <button onClick={toggle} aria-label="Toggle dark mode"
+      className="rounded-lg border border-white/30 bg-white/10 px-3 py-2 text-sm font-medium text-white transition hover:bg-white/20">
+      {dark ? "Light" : "Dark"}
+    </button>
+  );
+}
+
+function StatChip({ label, value, tone }) {
+  const tones = {
+    teal: "bg-teal-50 text-teal-700 ring-teal-200 dark:bg-teal-950/50 dark:text-teal-300 dark:ring-teal-900",
+    emerald: "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:ring-emerald-900",
+    slate: "bg-slate-50 text-slate-600 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700",
+  };
+  return (
+    <div className={"rounded-xl px-4 py-3 ring-1 " + tones[tone]}>
+      <p className="text-2xl font-bold">{value}</p>
+      <p className="text-xs font-medium uppercase tracking-wide opacity-80">{label}</p>
+    </div>
+  );
+}
+
+function ConverterPanel({ attachments, onConvert }) {
+  const [input, setInput] = useState(SAMPLE);
+  const [warnings, setWarnings] = useState([]);
+  const [stats, setStats] = useState({ straight: 0, turns: 0, other: 0 });
+
+  function handleConvert() {
+    const result = convert(input);
+    const merged = {
+      straight: result.stats.straight,
+      turns: result.stats.turns,
+      other: result.stats.other + attachments.length,
+    };
+    onConvert(result.code);
+    setWarnings(result.warnings);
+    setStats(merged);
+  }
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="border-b border-slate-100 px-6 py-5 dark:border-slate-800">
+        <h2 className="font-serif text-xl text-slate-800 dark:text-slate-100">Pybricks / FLL Path Studio Input</h2>
+        <p className="text-sm text-slate-500 dark:text-slate-400">Paste any Pybricks script. The full API is mapped to SPIKE Prime Python.</p>
+      </div>
+      <div className="space-y-4 px-6 py-6">
+        <textarea value={input} onChange={(e) => setInput(e.target.value)} spellCheck={false}
+          className="min-h-72 w-full rounded-xl border border-slate-200 bg-slate-50 p-3 font-mono text-xs text-slate-800 outline-none focus:ring-2 focus:ring-teal-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100" />
+        <div className="flex flex-wrap items-center gap-3">
+          <button onClick={handleConvert}
+            className="rounded-xl bg-teal-700 px-6 py-2 text-sm font-medium text-white transition hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500">
+            Convert to SPIKE
+          </button>
+          <button onClick={() => setInput(SAMPLE)}
+            className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">
+            Load Sample
+          </button>
+          <button onClick={() => setInput("")}
+            className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">
+            Clear
+          </button>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          <StatChip label="Straights" value={stats.straight} tone="teal" />
+          <StatChip label="Turns" value={stats.turns} tone="emerald" />
+          <StatChip label="Other" value={stats.other} tone="slate" />
+        </div>
+        {warnings.length > 0 && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-950/40">
+            <p className="text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">Warnings</p>
+            <ul className="mt-2 space-y-1 text-sm text-amber-800 dark:text-amber-200">
+              {warnings.map((w, i) => <li key={i}>- {w}</li>)}
+            </ul>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AttachmentPanel({ attachments, onChange }) {
+  const PORTS = ["A", "B", "C", "D", "E", "F"];
+  function add() {
+    onChange([...attachments, { id: Math.random().toString(36).slice(2), port: "D", speed: 500, angle: 360 }]);
+  }
+  function update(id, patch) {
+    onChange(attachments.map((a) => (a.id === id ? { ...a, ...patch } : a)));
+  }
+  function remove(id) {
+    onChange(attachments.filter((a) => a.id !== id));
+  }
+  const inputCls = "w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-teal-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100";
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-6 py-5 dark:border-slate-800">
+        <div>
+          <h2 className="font-serif text-xl text-slate-800 dark:text-slate-100">Attachment Motors</h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Add, edit, and remove attachment moves.</p>
+        </div>
+        <button onClick={add}
+          className="rounded-lg bg-teal-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500">
+          + Add
+        </button>
+      </div>
+      <div className="space-y-3 px-6 py-6">
+        {attachments.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center dark:border-slate-700 dark:bg-slate-950">
+            <p className="text-sm font-medium text-slate-600 dark:text-slate-300">No attachment moves yet</p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Click Add to create a motor move (e.g. port D, 500 speed, 360 deg).</p>
+          </div>
+        ) : (
+          attachments.map((a) => (
+            <div key={a.id} className="grid grid-cols-12 items-end gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950">
+              <div className="col-span-3 space-y-1">
+                <label className="text-xs text-slate-500 dark:text-slate-400">Port</label>
+                <select value={a.port} onChange={(e) => update(a.id, { port: e.target.value })} className={inputCls}>
+                  {PORTS.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </div>
+              <div className="col-span-3 space-y-1">
+                <label className="text-xs text-slate-500 dark:text-slate-400">Speed</label>
+                <input type="number" value={a.speed} onChange={(e) => update(a.id, { speed: Number(e.target.value) || 0 })} className={inputCls} />
+              </div>
+              <div className="col-span-3 space-y-1">
+                <label className="text-xs text-slate-500 dark:text-slate-400">Angle (deg)</label>
+                <input type="number" value={a.angle} onChange={(e) => update(a.id, { angle: Number(e.target.value) || 0 })} className={inputCls} />
+              </div>
+              <div className="col-span-3 flex justify-end">
+                <button onClick={() => remove(a.id)} aria-label="Remove attachment"
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-rose-600 transition hover:bg-rose-50 dark:border-slate-700 dark:text-rose-400 dark:hover:bg-rose-950/40">
+                  x
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SettingsPanel({ settings, onChange }) {
+  const PORTS = ["A", "B", "C", "D", "E", "F"];
+  function set(key, value) { onChange({ ...settings, [key]: value }); }
+  const inputCls = "w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-teal-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100";
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="border-b border-slate-100 px-6 py-5 dark:border-slate-800">
+        <h2 className="font-serif text-xl text-slate-800 dark:text-slate-100">Calibration</h2>
+        <p className="text-sm text-slate-500 dark:text-slate-400">Tune constants baked into the generated header.</p>
+      </div>
+      <div className="grid grid-cols-2 gap-4 px-6 py-6">
+        <div className="space-y-1">
+          <label className="text-xs text-slate-500 dark:text-slate-400">Wheel diameter (mm)</label>
+          <input type="number" value={settings.wheelDiameter} onChange={(e) => set("wheelDiameter", Number(e.target.value) || 0)} className={inputCls} />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-slate-500 dark:text-slate-400">Axle track (mm)</label>
+          <input type="number" value={settings.axleTrack} onChange={(e) => set("axleTrack", Number(e.target.value) || 0)} className={inputCls} />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-slate-500 dark:text-slate-400">Drive Kp</label>
+          <input type="number" step="0.1" value={settings.driveKp} onChange={(e) => set("driveKp", Number(e.target.value) || 0)} className={inputCls} />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-slate-500 dark:text-slate-400">Turn Kp</label>
+          <input type="number" step="0.1" value={settings.turnKp} onChange={(e) => set("turnKp", Number(e.target.value) || 0)} className={inputCls} />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-slate-500 dark:text-slate-400">Turn tolerance (deg)</label>
+          <input type="number" step="0.1" value={settings.turnTolerance} onChange={(e) => set("turnTolerance", Number(e.target.value) || 0)} className={inputCls} />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-slate-500 dark:text-slate-400">Drive ports</label>
+          <div className="flex gap-2">
+            <select value={settings.drivePorts[0]} onChange={(e) => set("drivePorts", [e.target.value, settings.drivePorts[1]])} className={inputCls}>
+              {PORTS.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+            <select value={settings.drivePorts[1]} onChange={(e) => set("drivePorts", [settings.drivePorts[0], e.target.value])} className={inputCls}>
+              {PORTS.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ApiMapPanel() {
+  const rows = [
+    ["PrimeHub / InventorHub", "PrimeHub"],
+    ["DriveBase", "MotorPair"],
+    ["Motor / DCMotor", "Motor"],
+    ["ColorSensor", "ColorSensor"],
+    ["UltrasonicSensor", "DistanceSensor"],
+    ["ForceSensor / TouchSensor", "ForceSensor"],
+    ["hub.imu", "hub.motion_sensor"],
+    ["hub.imu.heading()", "gyro.get_yaw_angle()"],
+    ["hub.imu.reset_heading()", "gyro.reset_yaw_angle()"],
+    ["hub.battery", "hub.battery"],
+    ["hub.speaker", "hub.sound"],
+    ["hub.light", "hub.status_light"],
+    ["hub.display", "hub.display"],
+    ["wait()", "wait_for_seconds()"],
+    ["StopWatch / Timer", "Timer"],
+    ["motor.run_angle()", "motor.run_for_degrees()"],
+    ["motor.run_time()", "motor.run_for_seconds()"],
+    ["motor.run()", "motor.start()"],
+    ["motor.angle()", "motor.get_position()"],
+    ["motor.speed()", "motor.get_speed()"],
+    ["drive_base.drive()", "drive.start()"],
+    ["drive_base.straight()", "gyro drive_gyro()"],
+    ["drive_base.turn()", "gyro turn_gyro()"],
+    ["drive_scurve()", "gyro drive_scurve()"],
+    ["drive_tank_curve()", "gyro drive_tank_curve()"],
+    ["sensor.color()", "sensor.get_color()"],
+    ["sensor.reflection()", "sensor.get_reflected_light_intensity()"],
+    ["sensor.distance()", "sensor.get_distance_cm()"],
+  ];
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="border-b border-slate-100 px-6 py-5 dark:border-slate-800">
+        <h2 className="font-serif text-xl text-slate-800 dark:text-slate-100">API Map</h2>
+        <p className="text-sm text-slate-500 dark:text-slate-400">Full Pybricks to SPIKE Prime symbol reference.</p>
+      </div>
+      <div className="max-h-80 overflow-auto px-6 py-4">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-left text-slate-400 dark:text-slate-500">
+              <th className="pb-2 font-medium uppercase tracking-wide">Pybricks</th>
+              <th className="pb-2 font-medium uppercase tracking-wide">SPIKE Prime</th>
+            </tr>
+          </thead>
+          <tbody className="font-mono">
+            {rows.map(([a, b], i) => (
+              <tr key={i} className="border-t border-slate-100 dark:border-slate-800">
+                <td className="py-2 pr-3 text-rose-600 dark:text-rose-400">{a}</td>
+                <td className="py-2 text-teal-700 dark:text-teal-300">{b}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function ReferencePanel({ output }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    if (!output) return;
+    try {
+      await navigator.clipboard.writeText(output);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (e) { setCopied(false); }
+  }
+  function download() {
+    if (!output) return;
+    const blob = new Blob([output], { type: "text/x-python" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "spike_mission.py";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+  return (
+    <div className="flex h-full flex-col rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-6 py-5 dark:border-slate-800">
+        <h2 className="font-serif text-xl text-slate-800 dark:text-slate-100">SPIKE Prime Output</h2>
+        <div className="flex gap-2">
+          <button onClick={copy} disabled={!output}
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">
+            {copied ? "Copied!" : "Copy"}
+          </button>
+          <button onClick={download} disabled={!output}
+            className="rounded-lg bg-teal-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-teal-800 disabled:opacity-40 dark:bg-teal-600 dark:hover:bg-teal-500">
+            Download
+          </button>
+        </div>
+      </div>
+      <div className="flex-1 px-6 py-6">
+        {output ? (
+          <pre className="max-h-96 overflow-auto rounded-xl bg-slate-900 p-4 text-xs leading-relaxed text-teal-100 ring-1 ring-slate-800 dark:bg-slate-950">
+            <code>{output}</code>
+          </pre>
+        ) : (
+          <div className="flex h-64 flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 text-center dark:border-slate-700 dark:bg-slate-950">
+            <p className="text-sm font-medium text-slate-600 dark:text-slate-300">No output yet</p>
+            <p className="mt-1 max-w-xs text-xs text-slate-500 dark:text-slate-400">Paste a script and hit Convert to generate SPIKE Prime Python.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* =====================================================================
+   ROOT
+   ===================================================================== */
+
+function App() {
+  const [output, setOutput] = useState("");
+  const [attachments, setAttachments] = useState([]);
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  return (
+    <div className="min-h-screen bg-slate-100 dark:bg-slate-950">
+      <header className="border-b border-teal-900/20 bg-gradient-to-r from-teal-800 to-emerald-700 dark:from-teal-950 dark:to-emerald-900">
+        <div className="mx-auto flex max-w-6xl items-start justify-between gap-4 px-6 py-8">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-widest text-teal-100/80">Full Pybricks API to SPIKE Prime</p>
+            <h1 className="mt-1 font-serif text-3xl font-bold text-white sm:text-4xl">Pybricks to SPIKE Converter</h1>
+            <p className="mt-2 max-w-2xl text-sm text-teal-50/90">
+              Translates the entire Pybricks library - hubs, motors, DriveBase, S-curve and tank-curve motion, sensors, and tools - into ready-to-run SPIKE Prime Python, with gyro-corrected straights and turns.
+            </p>
+          </div>
+          <ThemeToggle />
+        </div>
+      </header>
+      <main className="mx-auto grid max-w-6xl grid-cols-1 gap-6 px-6 py-8 lg:grid-cols-5">
+        <div className="space-y-6 lg:col-span-3">
+          <ConverterPanel attachments={attachments} onConvert={(code) => setOutput(code)} />
+          <AttachmentPanel attachments={attachments} onChange={setAttachments} />
+          <SettingsPanel settings={settings} onChange={setSettings} />
+        </div>
+        <div className="space-y-6 lg:col-span-2">
+          <ReferencePanel output={output} />
+          <ApiMapPanel />
+        </div>
+      </main>
+      <footer className="border-t border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <div className="mx-auto max-w-6xl px-6 py-6 text-xs text-slate-500 dark:text-slate-400">
+          Runs entirely in your browser. Tune gains and ports in the generated code before running on hardware.
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
